@@ -509,6 +509,334 @@ function guardar() {
 
 // Arrancar
 initAuth();
+</script><script>
+// ==========================================
+// CONFIGURACIÓN & ESTADO GLOBAL
+// ==========================================
+const CONFIG = {
+  admin: { user: 'admin', pass: 'Admin2026!', role: 'admin' },
+  visor: { user: 'visor', pass: 'Visor2026!', role: 'visor' },
+  sesionKey: 'prestamo_session',
+  storagePrefix: 'prestamo_db_'
+};
+
+const DB = {
+  get: (key) => JSON.parse(localStorage.getItem(`${CONFIG.storagePrefix}${key}`) || 'null'),
+  set: (key, val) => localStorage.setItem(`${CONFIG.storagePrefix}${key}`, JSON.stringify(val)),
+  clearAll: () => Object.keys(localStorage).filter(k => k.startsWith(CONFIG.storagePrefix)).forEach(k => localStorage.removeItem(k))
+};
+
+let state = {
+  caja: DB.get('caja') ?? 0,
+  clientes: DB.get('clientes') ?? [],
+  prestamos: DB.get('prestamos') ?? [],
+  pagos: DB.get('pagos') ?? [],
+  movimientos: DB.get('movimientos') ?? [],
+  usuario: null
+};
+
+// ==========================================
+// AUTENTICACIÓN & PRIVACIDAD
+// ==========================================
+function initAuth() {
+  const sesion = sessionStorage.getItem(CONFIG.sesionKey);
+  if (sesion) {
+    state.usuario = JSON.parse(sesion);
+    mostrarApp();
+  } else {
+    document.getElementById('loginOverlay')?.classList.remove('hidden');
+    document.getElementById('mainApp')?.classList.add('hidden');
+  }
+}
+
+function login(e) {
+  e.preventDefault();
+  const u = document.getElementById('loginUser')?.value.trim().toLowerCase();
+  const p = document.getElementById('loginPass')?.value;
+  const err = document.getElementById('loginError');
+
+  const cred = u === CONFIG.admin.user ? CONFIG.admin : u === CONFIG.visor.user ? CONFIG.visor : null;
+  if (cred && cred.pass === p) {
+    state.usuario = { user: cred.user, role: cred.role };
+    sessionStorage.setItem(CONFIG.sesionKey, JSON.stringify(state.usuario));
+    err.textContent = '';
+    mostrarApp();
+  } else {
+    err.textContent = '❌ Credenciales inválidas';
+  }
+}
+
+function logout() {
+  sessionStorage.removeItem(CONFIG.sesionKey);
+  location.reload();
+}
+
+function mostrarApp() {
+  document.getElementById('loginOverlay')?.classList.add('hidden');
+  document.getElementById('mainApp')?.classList.remove('hidden');
+  aplicarRestriccionesRol();
+  initApp();
+}
+
+function aplicarRestriccionesRol() {
+  const esAdmin = state.usuario?.role === 'admin';
+  document.querySelectorAll('[data-rol="admin"]').forEach(el => esAdmin ? el.classList.remove('hidden') : el.classList.add('hidden'));
+  document.getElementById('roleBadge').textContent = esAdmin ? '👑 Administrador' : '👁️ Visor';
+}
+
+// ==========================================
+// LÓGICA DE NEGOCIO
+// ==========================================
+function calcularProximoPago(fechaBase, frecuencia) {
+  const f = new Date(fechaBase);
+  if (frecuencia === 'semanal') f.setDate(f.getDate() + 7);
+  else if (frecuencia === 'quincenal') f.setDate(f.getDate() + 15);
+  else f.setMonth(f.getMonth() + 1);
+  return f.toISOString().split('T')[0];
+}
+
+function diferenciaDias(fecha) {
+  const hoy = new Date(); hoy.setHours(0,0,0,0);
+  const obj = new Date(fecha); obj.setHours(0,0,0,0);
+  return Math.ceil((obj - hoy) / (1000 * 60 * 60 * 24));
+}
+
+function obtenerEstado(fechaProx, saldo) {
+  if (saldo <= 0) return 'liquidado';
+  const dias = diferenciaDias(fechaProx);
+  return dias < 0 ? 'vencido' : dias <= 3 ? 'pendiente' : 'al-dia';
+}
+
+// ==========================================
+// OPERACIONES
+// ==========================================
+function otorgarPrestamo(e) {
+  e.preventDefault();
+  const form = document.getElementById('formPrestamo');
+  const clienteId = form.clienteSelect?.value || 'nuevo';
+  const nombre = clienteId === 'nuevo' ? form.nuevoCliente.value.trim() : state.clientes.find(c => c.id === clienteId)?.nombre;
+  const monto = parseFloat(form.monto.value);
+  const tasa = parseFloat(form.tasa.value);
+  const frec = form.frecuencia.value;
+  const prox = form.proximoPago.value;
+
+  if (!nombre || isNaN(monto) || monto <= 0 || isNaN(tasa) || !prox) return alert('Completa todos los campos obligatorios.');
+  if (monto > state.caja) return alert('❌ Fondos insuficientes en caja.');
+
+  // Guardar cliente si es nuevo
+  if (clienteId === 'nuevo') {
+    const nuevoC = { id: Date.now().toString(), nombre, telefono: '', fechaAlta: new Date().toISOString() };
+    state.clientes.push(nuevoC);
+  }
+
+  const clienteRef = state.clientes.find(c => c.nombre === nombre);
+  const prestamo = {
+    id: Date.now().toString(),
+    clienteId: clienteRef.id,
+    clienteNombre: nombre,
+    monto, tasa, frecuencia: frec, proximoPago: prox,
+    saldo: monto, interesTotal: 0, estado: 'activo', fechaCreacion: new Date().toISOString()
+  };
+
+  state.prestamos.push(prestamo);
+  state.caja -= monto;
+  state.movimientos.push({ id: Date.now().toString(), fecha: prox, tipo: 'salida', monto: -monto, descripcion: `Préstamo a ${nombre}`, referencia: prestamo.id });
+  guardarDatos();
+  form.reset(); configurarFechasHoy(); renderTodo();
+  alert('✅ Préstamo otorgado correctamente.');
+}
+
+function registrarPago(e) {
+  e.preventDefault();
+  const form = document.getElementById('formPago');
+  const prestamoId = form.prestamoSelect.value;
+  const monto = parseFloat(form.monto.value);
+  const fecha = form.fecha.value;
+  const obs = form.observaciones.value;
+
+  if (!prestamoId || isNaN(monto) || monto <= 0 || !fecha) return alert('Completa los campos obligatorios.');
+  const p = state.prestamos.find(x => x.id === prestamoId);
+  if (!p || p.saldo <= 0) return alert('Préstamo no válido o ya liquidado.');
+
+  const interesPeriodo = p.saldo * (p.tasa / 100);
+  const capital = monto - interesPeriodo;
+  if (capital < 0) return alert('⚠️ El pago no cubre el interés mínimo del período.');
+
+  const pagoReal = Math.min(monto, p.saldo + interesPeriodo);
+  const intAplicado = pagoReal >= interesPeriodo ? interesPeriodo : 0;
+  const capAplicado = pagoReal - intAplicado;
+
+  p.saldo -= capAplicado;
+  p.interesTotal += intAplicado;
+  p.proximoPago = calcularProximoPago(fecha, p.frecuencia);
+  p.estado = p.saldo <= 0.01 ? 'liquidado' : 'activo';
+
+  state.caja += pagoReal;
+  state.pagos.push({ id: Date.now().toString(), prestamoId, clienteId: p.clienteId, fecha, monto: pagoReal, interes: intAplicado, capital: capAplicado, observaciones: obs });
+  state.movimientos.push({ id: Date.now().toString(), fecha, tipo: 'entrada', monto: pagoReal, descripcion: `Pago ${p.clienteNombre}`, referencia: prestamoId });
+  
+  guardarDatos();
+  form.reset(); configurarFechasHoy(); renderTodo();
+  alert('✅ Pago registrado. Saldo actualizado.');
+}
+
+// ==========================================
+// UI & RENDERIZADO
+// ==========================================
+function initApp() {
+  configurarFechasHoy();
+  renderTodo();
+  configurarEventos();
+}
+
+function configurarFechasHoy() {
+  const hoy = new Date().toISOString().split('T')[0];
+  document.querySelectorAll('input[type="date"]').forEach(i => i.value = hoy);
+}
+
+function renderTodo() {
+  renderKPIs();
+  renderAlertas();
+  renderTablaPrestamos();
+  renderTablaPagos();
+  renderClientes();
+  renderCaja();
+}
+
+function renderKPIs() {
+  const activos = state.prestamos.filter(p => p.estado === 'activo').length;
+  const vencidos = state.prestamos.filter(p => obtenerEstado(p.proximoPago, p.saldo) === 'vencido').length;
+  const pendientes = state.prestamos.filter(p => obtenerEstado(p.proximoPago, p.saldo) === 'pendiente').length;
+  const interesHist = state.pagos.reduce((a, p) => a + (p.interes || 0), 0);
+
+  document.getElementById('cajaDisplay').textContent = `$${state.caja.toFixed(2)}`;
+  document.getElementById('pendientesDisplay').textContent = `${pendientes} / ${vencidos}`;
+  document.getElementById('clientesCount').textContent = `${state.clientes.length} clientes`;
+  document.getElementById('interesHistorico').textContent = `$${interesHist.toFixed(2)}`;
+}
+
+function renderAlertas() {
+  const lista = document.getElementById('listaAlertas');
+  const box = document.getElementById('alertasBox');
+  lista.innerHTML = '';
+  const alertas = [];
+
+  state.prestamos.filter(p => p.estado === 'activo').forEach(p => {
+    const st = obtenerEstado(p.proximoPago, p.saldo);
+    if (st === 'vencido') alertas.push(`🔴 <b>${p.clienteNombre}</b> vencido desde ${p.proximoPago} ($${p.saldo.toFixed(2)})`);
+    else if (st === 'pendiente') alertas.push(`🟡 <b>${p.clienteNombre}</b> vence el ${p.proximoPago}`);
+  });
+
+  if (alertas.length) { box.classList.remove('hidden'); lista.innerHTML = alertas.map(a => `<li>${a}</li>`).join(''); }
+  else box.classList.add('hidden');
+}
+
+function renderTablaPrestamos() {
+  const tbody = document.getElementById('tablaPrestamosBody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  state.prestamos.filter(p => p.estado !== 'liquidado').forEach(p => {
+    const st = obtenerEstado(p.proximoPago, p.saldo);
+    const clase = st === 'vencido' ? 'text-danger' : st === 'pendiente' ? 'text-warning' : 'text-success';
+    const texto = st.toUpperCase();
+    tbody.innerHTML += `
+      <tr>
+        <td>${p.clienteNombre}</td><td>$${p.monto.toFixed(2)}</td><td>$${p.saldo.toFixed(2)}</td>
+        <td>${p.proximoPago}</td><td class="${clase} font-weight-bold">${texto}</td>
+        <td data-rol="admin"><button class="btn btn-sm btn-primary" onclick="seleccionarPrestamoPago('${p.id}')">Pagar</button></td>
+      </tr>`;
+  });
+}
+
+function renderTablaPagos() {
+  const tbody = document.getElementById('tablaPagosBody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  const historial = [...state.pagos].sort((a, b) => new Date(b.fecha) - new Date(a.fecha)).slice(0, 20);
+  historial.forEach(p => {
+    const cliente = state.clientes.find(c => c.id === p.clienteId)?.nombre || 'Desconocido';
+    tbody.innerHTML += `<tr><td>${p.fecha}</td><td>${cliente}</td><td>$${p.monto.toFixed(2)}</td><td>$${p.interes.toFixed(2)}</td><td>$${p.capital.toFixed(2)}</td></tr>`;
+  });
+}
+
+function renderClientes() {
+  const select = document.getElementById('clienteSelect');
+  if (!select) return;
+  select.innerHTML = '<option value="">Seleccionar cliente...</option><option value="nuevo">➕ Nuevo Cliente</option>';
+  state.clientes.forEach(c => select.innerHTML += `<option value="${c.id}">${c.nombre}</option>`);
+}
+
+function renderCaja() {
+  const lista = document.getElementById('listaMovimientosCaja');
+  if (!lista) return;
+  lista.innerHTML = '';
+  const movs = [...state.movimientos].sort((a, b) => new Date(b.fecha) - new Date(a.fecha)).slice(0, 10);
+  movs.forEach(m => {
+    const signo = m.tipo === 'entrada' ? '+' : '-';
+    const color = m.tipo === 'entrada' ? 'text-success' : 'text-danger';
+    lista.innerHTML += `<tr><td>${m.fecha}</td><td>${m.descripcion}</td><td class="${color}">${signo}$${Math.abs(m.monto).toFixed(2)}</td></tr>`;
+  });
+}
+
+function seleccionarPrestamoPago(id) {
+  document.getElementById('prestamoSelect').value = id;
+  cambiarVista('pago');
+  const p = state.prestamos.find(x => x.id === id);
+  if (p) document.getElementById('montoPago').value = (p.saldo + (p.saldo * (p.tasa / 100))).toFixed(2);
+}
+
+// ==========================================
+// NAVEGACIÓN & EXPORTACIÓN
+// ==========================================
+function cambiarVista(vista) {
+  document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
+  document.getElementById(`view-${vista}`)?.classList.remove('hidden');
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector(`.nav-btn[data-target="${vista}"]`)?.classList.add('active');
+}
+
+function exportarCSV(tipo) {
+  let data = [], nombre = 'export.csv';
+  if (tipo === 'saldos') {
+    data = state.prestamos.map(p => ({ Cliente: p.clienteNombre, Saldo: p.saldo, ProximoPago: p.proximoPago, Estado: p.estado }));
+    nombre = 'saldos_prestamos.csv';
+  } else if (tipo === 'historial') {
+    data = state.pagos.map(p => ({ Fecha: p.fecha, Cliente: p.clienteNombre || 'N/A', Monto: p.monto, Interes: p.interes, Capital: p.capital }));
+    nombre = 'historial_pagos.csv';
+  }
+  if (!data.length) return alert('Sin datos para exportar.');
+  
+  const headers = Object.keys(data[0]);
+  const csv = [headers.join(','), ...data.map(r => headers.map(h => `"${r[h] ?? ''}"`).join(','))].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = nombre; a.click();
+}
+
+function guardarDatos() {
+  DB.set('caja', state.caja);
+  DB.set('clientes', state.clientes);
+  DB.set('prestamos', state.prestamos);
+  DB.set('pagos', state.pagos);
+  DB.set('movimientos', state.movimientos);
+}
+
+function configurarEventos() {
+  document.getElementById('loginForm')?.addEventListener('submit', login);
+  document.getElementById('btnLogout')?.addEventListener('click', logout);
+  document.getElementById('formPrestamo')?.addEventListener('submit', otorgarPrestamo);
+  document.getElementById('formPago')?.addEventListener('submit', registrarPago);
+  document.querySelectorAll('.nav-btn').forEach(btn => btn.addEventListener('click', e => cambiarVista(e.target.dataset.target)));
+  document.getElementById('btnExportSaldos')?.addEventListener('click', () => exportarCSV('saldos'));
+  document.getElementById('btnExportHistorial')?.addEventListener('click', () => exportarCSV('historial'));
+  document.getElementById('btnReset')?.addEventListener('click', () => {
+    if (confirm('⚠️ ¿Borrar TODOS los datos? Esta acción es irreversible.')) {
+      DB.clearAll(); location.reload();
+    }
+  });
+}
+
+// Iniciar
+document.addEventListener('DOMContentLoaded', initAuth);
 </script>
 </body>
 </html>
