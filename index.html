@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistema de Préstamos | Acceso Privado</title>
+  <style>
+    :root {
+      --bg: #f8f9fa; --card: #fff; --primary: #2563eb; --success: #16a34a;
+      --warning: #f59e0b; --danger: #dc2626; --text: #1e293b; --gray: #64748b;
+      --border: #e2e8f0; --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+    body { background: var(--bg); color: var(--text); line-height: 1.5; padding: 1rem; }
+    .container { max-width: 1100px; margin: 0 auto; }
+    
+    /* LOGIN */
+    #loginOverlay {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+      display: flex; align-items: center; justify-content: center; z-index: 1000;
+    }
+    .login-card { background: var(--card); padding: 2rem; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 100%; max-width: 400px; text-align: center; }
+    .login-card h2 { margin-bottom: 0.5rem; color: var(--primary); }
+    .login-card p { color: var(--gray); margin-bottom: 1.5rem; font-size: 0.9rem; }
+    .login-card input { width: 100%; padding: 0.7rem; margin-bottom: 0.8rem; border: 1px solid var(--border); border-radius: 6px; font-size: 1rem; }
+    .login-card input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px rgb(37 99 235 / 0.2); }
+    .login-card .btn { width: 100%; padding: 0.8rem; font-size: 1rem; }
+    #loginError { color: var(--danger); font-size: 0.85rem; margin-top: 0.5rem; min-height: 1.2em; }
+
+    /* MAIN APP */
+    #mainContent { display: none; }
+    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 0.5rem; }
+    h1 { font-size: 1.5rem; color: var(--primary); }
+    .btn { padding: 0.5rem 0.9rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 500; transition: 0.2s; }
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-success { background: var(--success); color: white; }
+    .btn-warning { background: var(--warning); color: #000; }
+    .btn-danger { background: var(--danger); color: white; }
+    .btn:hover { opacity: 0.9; transform: translateY(-1px); }
+    .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); margin-bottom: 1.5rem; }
+    .card { background: var(--card); padding: 1rem; border-radius: 8px; box-shadow: var(--shadow); }
+    .kpi { text-align: center; }
+    .kpi h3 { font-size: 0.85rem; color: var(--gray); margin-bottom: 0.3rem; }
+    .kpi p { font-size: 1.6rem; font-weight: 700; }
+    .alert-box { background: #fff8e1; border-left: 4px solid var(--warning); padding: 0.7rem; border-radius: 4px; margin-bottom: 1rem; display: none; }
+    .alert-box.active { display: block; }
+    form { display: grid; gap: 0.7rem; margin-bottom: 1.5rem; }
+    .form-row { display: grid; gap: 0.7rem; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+    label { font-size: 0.85rem; font-weight: 500; margin-bottom: 0.2rem; display: block; }
+    input, select { width: 100%; padding: 0.6rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.95rem; }
+    input:focus, select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px rgb(37 99 235 / 0.2); }
+    table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
+    th, td { padding: 0.6rem; text-align: left; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+    th { background: #f1f5f9; font-weight: 600; }
+    .status { padding: 0.2rem 0.5rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; }
+    .status-al-dia { background: #dcfce7; color: var(--success); }
+    .status-pendiente { background: #fef3c7; color: #92400e; }
+    .status-vencido { background: #fee2e2; color: var(--danger); }
+    .tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+    .tab { padding: 0.5rem 1rem; cursor: pointer; border-radius: 6px; background: #e2e8f0; font-size: 0.9rem; }
+    .tab.active { background: var(--primary); color: white; }
+    .hidden { display: none !important; }
+    .report-card { background: #f8fafc; border: 1px dashed var(--border); padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
+    footer { margin-top: 2rem; text-align: center; color: var(--gray); font-size: 0.8rem; }
+    @media print { .no-print { display: none !important; } }
+  </style>
+</head>
+<body>
+
+  <!-- LOGIN OVERLAY -->
+  <div id="loginOverlay">
+    <div class="login-card">
+      <h2>🔐 Acceso al Sistema</h2>
+      <p>Ingrese sus credenciales para continuar</p>
+      <form id="loginForm">
+        <input type="text" id="loginUser" placeholder="Usuario" required autocomplete="username">
+        <input type="password" id="loginPass" placeholder="Contraseña" required autocomplete="current-password">
+        <button type="submit" class="btn btn-primary">Iniciar Sesión</button>
+        <div id="loginError"></div>
+      </form>
+      <p style="margin-top:1rem; font-size:0.8rem; color:#888;">
+        <b>Demo:</b> Admin: `admin` / `admin123`<br>
+        <b>Visor:</b> `visor` / `visor123`
+      </p>
+    </div>
+  </div>
+
+  <!-- MAIN APP CONTENT -->
+  <div id="mainContent" class="container">
+    <header>
+      <h1>💰 Sistema de Préstamos</h1>
+      <div class="no-print">
+        <span id="roleBadge" class="status status-al-dia" style="margin-right:0.5rem;"></span>
+        <button class="btn btn-warning" onclick="logout()">🚪 Cerrar Sesión</button>
+        <button class="btn btn-danger admin-only" onclick="resetearSistema()">⚠️ Resetear Todo</button>
+      </div>
+    </header>
+
+    <!-- ALERTAS -->
+    <div id="alertas" class="alert-box">
+      <strong>🔔 Alarmas Activas:</strong>
+      <ul id="listaAlertas" style="margin-top:0.3rem; padding-left:1.2rem;"></ul>
+    </div>
+
+    <!-- KPIs -->
+    <div class="grid">
+      <div class="card kpi"><h3>Caja Disponible</h3><p id="kpiCaja">$0.00</p></div>
+      <div class="card kpi"><h3>Préstamos Activos</h3><p id="kpiActivos">0</p></div>
+      <div class="card kpi"><h3>Vencidos / Próx. a Vencer</h3><p id="kpiRiesgo">0</p></div>
+      <div class="card kpi"><h3>Interés Generado (Hist.)</h3><p id="kpiInteres">$0.00</p></div>
+    </div>
+
+    <!-- NAVEGACIÓN -->
+    <div class="tabs no-print">
+      <div class="tab active" onclick="cambiarTab('operaciones')">📋 Operaciones</div>
+      <div class="tab" onclick="cambiarTab('clientes')">👥 Clientes</div>
+      <div class="tab" onclick="cambiarTab('reportes')">📊 Reportes</div>
+    </div>
+
+    <!-- OPERACIONES -->
+    <div id="operaciones" class="card">
+      <h2 style="margin-bottom:1rem;">🔄 Registrar Movimiento</h2>
+      <div class="form-row admin-only">
+        <div>
+          <label>Tipo</label>
+          <select id="tipoMov" onchange="mostrarFormulario()">
+            <option value="prestamo">📥 Nuevo Préstamo</option>
+            <option value="pago">💳 Registrar Pago</option>
+          </select>
+        </div>
+        <div>
+          <label>Cliente</label>
+          <input type="text" id="clienteMov" list="listaClientes" placeholder="Escribir o seleccionar...">
+          <datalist id="listaClientes"></datalist>
+        </div>
+      </div>
+
+      <form id="formPrestamo" class="admin-only">
+        <div class="form-row">
+          <div><label>Monto *</label><input type="number" id="montoPrestamo" step="0.01" required></div>
+          <div><label>Tasa (%) por período *</label><input type="number" id="tasaPrestamo" step="0.01" required></div>
+          <div><label>Frecuencia *</label>
+            <select id="frecPrestamo"><option value="mensual">Mensual</option><option value="quincenal">Quincenal</option><option value="semanal">Semanal</option></select>
+          </div>
+          <div><label>Próximo Pago *</label><input type="date" id="proximoPago" required></div>
+        </div>
+        <label>Observaciones</label><input type="text" id="obsPrestamo" placeholder="Opcional">
+        <button type="submit" class="btn btn-primary" style="margin-top:0.5rem;">✅ Otorgar Préstamo</button>
+      </form>
+
+      <form id="formPago" class="admin-only hidden">
+        <div class="form-row">
+          <div><label>Préstamo *</label><select id="prestamoPago" required></select></div>
+          <div><label>Monto a Pagar *</label><input type="number" id="montoPago" step="0.01" required></div>
+          <div><label>Fecha Pago *</label><input type="date" id="fechaPago" required></div>
+        </div>
+        <label>Observaciones</label><input type="text" id="obsPago" placeholder="Opcional">
+        <button type="submit" class="btn btn-success" style="margin-top:0.5rem;">💾 Confirmar Pago</button>
+      </form>
+      <p id="viewerMsg" class="admin-only hidden" style="text-align:center; color:var(--gray); padding:1rem;">🔒 Acceso de solo lectura. Contacte al administrador para registrar movimientos.</p>
+    </div>
+
+    <!-- CLIENTES & PRÉSTAMOS -->
+    <div id="clientes" class="card hidden">
+      <h2 style="margin-bottom:1rem;">📋 Préstamos Activos</h2>
+      <div style="overflow-x:auto;">
+        <table id="tablaPrestamos">
+          <thead><tr><th>Cliente</th><th>Capital</th><th>Saldo</th><th>Próximo Pago</th><th>Estado</th><th class="admin-only">Acción</th></tr></thead>
+          <tbody id="tbodyPrestamos"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- REPORTES -->
+    <div id="reportes" class="card hidden">
+      <h2 style="margin-bottom:1rem;">📊 Centro de Decisiones</h2>
+      <div class="report-card">
+        <h3>📈 Resumen de Cartera</h3>
+        <p id="repCartera">Sin datos aún.</p>
+      </div>
+      <div class="report-card">
+        <h3>⚠️ Préstamos en Riesgo</h3>
+        <ul id="repRiesgo" style="padding-left:1.2rem;"></ul>
+      </div>
+      <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+        <button class="btn btn-primary" onclick="exportarCSV('prestamos')">📥 Exportar Cartera CSV</button>
+        <button class="btn btn-success" onclick="exportarCSV('pagos')">📥 Exportar Historial Pagos CSV</button>
+        <button class="btn btn-warning" onclick="exportarCSV('caja')">📥 Exportar Movimientos Caja CSV</button>
+      </div>
+    </div>
+
+    <footer>Sistema local protegido. Los datos se guardan en este navegador. Haz copias de seguridad exportando CSV periódicamente.</footer>
+  </div>
+
+<script>
+// ================= CONFIGURACIÓN DE ACCESO =================
+const USUARIOS = {
+  admin: { pass: 'admin123', role: 'admin' },
+  visor: { pass: 'visor123', role: 'viewer' }
+};
+
+let ROL_ACTUAL = null;
+
+// ================= AUTENTICACIÓN =================
+function initAuth() {
+  const sesion = sessionStorage.getItem('app_session');
+  if (sesion) {
+    const user = JSON.parse(sesion);
+    acceder(user.role);
+  } else {
+    document.getElementById('loginOverlay').style.display = 'flex';
+  }
+}
+
+document.getElementById('loginForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const u = document.getElementById('loginUser').value.trim().toLowerCase();
+  const p = document.getElementById('loginPass').value;
+  const err = document.getElementById('loginError');
+
+  if (USUARIOS[u] && USUARIOS[u].pass === p) {
+    sessionStorage.setItem('app_session', JSON.stringify({ user: u, role: USUARIOS[u].role }));
+    err.textContent = '';
+    acceder(USUARIOS[u].role);
+    e.target.reset();
+  } else {
+    err.textContent = '❌ Usuario o contraseña incorrectos.';
+  }
+});
+
+function acceder(role) {
+  ROL_ACTUAL = role;
+  document.getElementById('loginOverlay').style.display = 'none';
+  document.getElementById('mainContent').style.display = 'block';
+  
+  const badge = document.getElementById('roleBadge');
+  badge.textContent = role === 'admin' ? '👑 Administrador' : '👁️ Visor Autorizado';
+  badge.className = `status ${role === 'admin' ? 'status-pendiente' : 'status-al-dia'}`;
+
+  aplicarRestricciones(role);
+  initApp();
+}
+
+function logout() {
+  sessionStorage.removeItem('app_session');
+  location.reload();
+}
+
+function aplicarRestricciones(role) {
+  const adminEls = document.querySelectorAll('.admin-only');
+  adminEls.forEach(el => {
+    if (role === 'viewer') {
+      el.classList.add('hidden');
+      if (el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'BUTTON') el.disabled = true;
+    } else {
+      el.classList.remove('hidden');
+      el.disabled = false;
+    }
+  });
+
+  if (role === 'viewer') {
+    document.getElementById('formPrestamo').classList.add('hidden');
+    document.getElementById('formPago').classList.add('hidden');
+    document.getElementById('tipoMov').style.display = 'none';
+    document.getElementById('clienteMov').style.display = 'none';
+  } else {
+    document.getElementById('tipoMov').style.display = '';
+    document.getElementById('clienteMov').style.display = '';
+  }
+}
+
+// ================= LÓGICA DE NEGOCIO =================
+const DB = {
+  get: k => JSON.parse(localStorage.getItem(k) || '[]'),
+  set: (k, v) => localStorage.setItem(k, JSON.stringify(v)),
+  clear: () => localStorage.clear()
+};
+
+let caja = parseFloat(localStorage.getItem('caja') || '0');
+let prestamos = DB.get('prestamos');
+let pagos = DB.get('pagos');
+let movimientosCaja = DB.get('movCaja');
+
+function initApp() {
+  actualizarUI();
+  configurarFechas();
+}
+
+function configurarFechas() {
+  const hoy = new Date().toISOString().split('T')[0];
+  const fechas = document.querySelectorAll('input[type="date"]');
+  fechas.forEach(f => f.value = hoy);
+}
+
+function calcularProximoPago(fechaActual, frecuencia) {
+  const f = new Date(fechaActual);
+  if (frecuencia === 'semanal') f.setDate(f.getDate() + 7);
+  else if (frecuencia === 'quincenal') f.setDate(f.getDate() + 15);
+  else f.setMonth(f.getMonth() + 1);
+  return f.toISOString().split('T')[0];
+}
+
+function diferenciaDias(fecha) {
+  const hoy = new Date(); hoy.setHours(0,0,0,0);
+  const obj = new Date(fecha); obj.setHours(0,0,0,0);
+  return Math.ceil((obj - hoy) / (1000 * 60 * 60 * 24));
+}
+
+function obtenerEstado(fechaProx, saldo) {
+  if (saldo <= 0) return 'liquidado';
+  const dias = diferenciaDias(fechaProx);
+  if (dias < 0) return 'vencido';
+  if (dias <= 3) return 'pendiente';
+  return 'al-dia';
+}
+
+// ================= OPERACIONES =================
+document.getElementById('tipoMov').addEventListener('change', mostrarFormulario);
+function mostrarFormulario() {
+  const tipo = document.getElementById('tipoMov').value;
+  document.getElementById('formPrestamo').classList.toggle('hidden', tipo !== 'prestamo');
+  document.getElementById('formPago').classList.toggle('hidden', tipo !== 'pago');
+  if (tipo === 'pago') cargarSelectPrestamos();
+}
+
+function cargarSelectPrestamos() {
+  const sel = document.getElementById('prestamoPago');
+  sel.innerHTML = '<option value="">Seleccionar...</option>';
+  prestamos.filter(p => p.saldo > 0).forEach(p => {
+    sel.innerHTML += `<option value="${p.id}">${p.cliente} - $${p.saldo.toFixed(2)}</option>`;
+  });
+}
+
+document.getElementById('formPrestamo').addEventListener('submit', e => {
+  e.preventDefault();
+  const cliente = document.getElementById('clienteMov').value.trim();
+  const monto = parseFloat(document.getElementById('montoPrestamo').value);
+  const tasa = parseFloat(document.getElementById('tasaPrestamo').value);
+  const frec = document.getElementById('frecPrestamo').value;
+  const prox = document.getElementById('proximoPago').value;
+  const obs = document.getElementById('obsPrestamo').value;
+
+  if (!cliente || isNaN(monto) || monto <= 0 || isNaN(tasa) || !prox) return alert('Completa todos los campos obligatorios.');
+  if (monto > caja) return alert('❌ Fondos insuficientes en caja.');
+
+  caja -= monto;
+  const nuevo = { id: Date.now().toString(), cliente, monto, tasa, frec, prox, saldo: monto, interesTotal: 0, obs, estado: 'activo' };
+  prestamos.push(nuevo);
+  movimientosCaja.push({ fecha: prox, tipo: 'préstamo', monto: -monto, ref: nuevo.id, cliente, obs });
+  guardar();
+  e.target.reset(); configurarFechas(); actualizarUI();
+  alert('✅ Préstamo registrado correctamente.');
+});
+
+document.getElementById('formPago').addEventListener('submit', e => {
+  e.preventDefault();
+  const idP = document.getElementById('prestamoPago').value;
+  const montoP = parseFloat(document.getElementById('montoPago').value);
+  const fechaP = document.getElementById('fechaPago').value;
+  const obs = document.getElementById('obsPago').value;
+
+  if (!idP || isNaN(montoP) || montoP <= 0 || !fechaP) return alert('Completa los campos obligatorios.');
+  const p = prestamos.find(x => x.id === idP);
+  if (!p || p.saldo <= 0) return alert('Préstamo no válido o ya liquidado.');
+
+  const interes = p.saldo * (p.tasa / 100);
+  const capital = montoP - interes;
+  if (capital < 0) return alert('El pago no cubre el interés mínimo calculado.');
+  
+  const pagoReal = Math.min(montoP, p.saldo + interes);
+  const intAplicado = pagoReal >= interes ? interes : 0;
+  const capAplicado = pagoReal - intAplicado;
+
+  p.saldo -= capAplicado;
+  p.interesTotal += intAplicado;
+  p.prox = calcularProximoPago(fechaP, p.frec);
+  if (p.saldo <= 0.01) { p.saldo = 0; p.estado = 'liquidado'; p.prox = '-'; }
+  else p.estado = 'activo';
+
+  caja += pagoReal;
+  pagos.push({ id: Date.now().toString(), prestamoId: idP, cliente: p.cliente, fecha: fechaP, monto: pagoReal, interes: intAplicado, capital: capAplicado, obs });
+  movimientosCaja.push({ fecha: fechaP, tipo: 'pago', monto: pagoReal, ref: idP, cliente: p.cliente, obs });
+
+  guardar();
+  e.target.reset(); configurarFechas(); actualizarUI();
+  alert('✅ Pago registrado y saldo actualizado.');
+});
+
+// ================= UI & ACTUALIZACIÓN =================
+function actualizarUI() {
+  document.getElementById('kpiCaja').textContent = `$${caja.toFixed(2)}`;
+  document.getElementById('kpiActivos').textContent = prestamos.filter(p => p.estado === 'activo').length;
+  
+  const vencidos = prestamos.filter(p => obtenerEstado(p.prox, p.saldo) === 'vencido').length;
+  const proximos = prestamos.filter(p => { const st = obtenerEstado(p.prox, p.saldo); return st === 'pendiente' && p.estado === 'activo'; }).length;
+  document.getElementById('kpiRiesgo').textContent = `${vencidos} vencidos / ${proximos} próximos`;
+
+  const interesHist = pagos.reduce((acc, p) => acc + (p.interes || 0), 0);
+  document.getElementById('kpiInteres').textContent = `$${interesHist.toFixed(2)}`;
+
+  renderTabla();
+  renderAlertas();
+  renderReportes();
+  actualizarDatalistClientes();
+}
+
+function renderTabla() {
+  const tbody = document.getElementById('tbodyPrestamos');
+  tbody.innerHTML = '';
+  const activos = prestamos.filter(p => p.estado !== 'liquidado');
+  activos.forEach(p => {
+    const st = obtenerEstado(p.prox, p.saldo);
+    const clase = st === 'vencido' ? 'status-vencido' : st === 'pendiente' ? 'status-pendiente' : 'status-al-dia';
+    const texto = st === 'vencido' ? 'VENCIDO' : st === 'pendiente' ? 'PRÓXIMO' : 'AL DÍA';
+    const accionBtn = ROL_ACTUAL === 'admin' ? `<td><button class="btn btn-primary" onclick="prepararPago('${p.id}')">Pagar</button></td>` : `<td class="hidden"></td>`;
+    tbody.innerHTML += `<tr><td>${p.cliente}</td><td>$${p.monto.toFixed(2)}</td><td>$${p.saldo.toFixed(2)}</td><td>${p.prox}</td><td><span class="status ${clase}">${texto}</span></td>${accionBtn}</tr>`;
+  });
+}
+
+function prepararPago(id) {
+  document.getElementById('tipoMov').value = 'pago';
+  mostrarFormulario();
+  setTimeout(() => {
+    document.getElementById('prestamoPago').value = id;
+    cargarSelectPrestamos();
+  }, 50);
+}
+
+function renderAlertas() {
+  const ul = document.getElementById('listaAlertas');
+  ul.innerHTML = '';
+  const alertas = [];
+  
+  prestamos.filter(p => p.estado === 'activo').forEach(p => {
+    const st = obtenerEstado(p.prox, p.saldo);
+    if (st === 'vencido') alertas.push(`🔴 <b>${p.cliente}</b> vencido desde ${p.prox} ($${p.saldo.toFixed(2)})`);
+    else if (st === 'pendiente') alertas.push(`🟡 <b>${p.cliente}</b> vence el ${p.prox} ($${p.saldo.toFixed(2)})`);
+  });
+
+  if (caja < 100) alertas.push(`🟠 Caja baja: $${caja.toFixed(2)}. Considere recargar.`);
+
+  const box = document.getElementById('alertas');
+  if (alertas.length > 0) { box.classList.add('active'); ul.innerHTML = alertas.map(a => `<li>${a}</li>`).join(''); }
+  else { box.classList.remove('active'); }
+}
+
+function renderReportes() {
+  const totalCartera = prestamos.filter(p => p.estado === 'activo').reduce((a, p) => a + p.saldo, 0);
+  const totalInteres = pagos.reduce((a, p) => a + (p.interes || 0), 0);
+  const mora = prestamos.filter(p => obtenerEstado(p.prox, p.saldo) === 'vencido').reduce((a, p) => a + p.saldo, 0);
+  
+  document.getElementById('repCartera').innerHTML = `Cartera activa: <b>$${totalCartera.toFixed(2)}</b> | Interés recaudado: <b>$${totalInteres.toFixed(2)}</b> | Monto en mora: <b>$${mora.toFixed(2)}</b>`;
+
+  const riesgos = prestamos.filter(p => { const st = obtenerEstado(p.prox, p.saldo); return (st === 'vencido' || st === 'pendiente') && p.estado === 'activo'; });
+  const ulR = document.getElementById('repRiesgo');
+  ulR.innerHTML = riesgos.length ? riesgos.map(p => `<li><b>${p.cliente}</b> - ${p.prox} - $${p.saldo.toFixed(2)}</li>`).join('') : '<li>Sin préstamos en riesgo.</li>';
+}
+
+function actualizarDatalistClientes() {
+  const dl = document.getElementById('listaClientes');
+  dl.innerHTML = '';
+  const clientes = [...new Set(prestamos.map(p => p.cliente))];
+  clientes.forEach(c => dl.innerHTML += `<option value="${c}">`);
+}
+
+// ================= EXPORTAR & RESET =================
+function exportarCSV(tipo) {
+  let datos = [], nombre = 'export.csv';
+  if (tipo === 'prestamos') {
+    datos = prestamos.map(p => ({ Cliente: p.cliente, MontoOriginal: p.monto, SaldoActual: p.saldo, Tasa: p.tasa, Frecuencia: p.frec, ProximoPago: p.prox, Estado: p.estado }));
+    nombre = 'cartera_prestamos.csv';
+  } else if (tipo === 'pagos') {
+    datos = pagos.map(p => ({ Fecha: p.fecha, Cliente: p.cliente, MontoTotal: p.monto, Interes: p.interes, Capital: p.capital }));
+    nombre = 'historial_pagos.csv';
+  } else {
+    datos = movimientosCaja.map(m => ({ Fecha: m.fecha, Tipo: m.tipo, Monto: m.monto, Cliente: m.cliente, Ref: m.ref }));
+    nombre = 'movimientos_caja.csv';
+  }
+
+  if (!datos.length) return alert('No hay datos para exportar.');
+  const headers = Object.keys(datos[0]);
+  const csv = [headers.join(','), ...datos.map(row => headers.map(h => `"${row[h] ?? ''}"`).join(','))].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = nombre; a.click();
+}
+
+function resetearSistema() {
+  if (confirm('⚠️ ¿Estás seguro? Esto eliminará TODOS los préstamos, pagos y saldos. Esta acción no se puede deshacer.')) {
+    DB.clear(); caja = 0; prestamos = []; pagos = []; movimientosCaja = [];
+    guardar(); location.reload();
+  }
+}
+
+function cambiarTab(tab) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('#operaciones, #clientes, #reportes').forEach(c => c.classList.add('hidden'));
+  document.querySelector(`.tab[onclick="cambiarTab('${tab}')"]`).classList.add('active');
+  document.getElementById(tab).classList.remove('hidden');
+}
+
+function guardar() {
+  localStorage.setItem('caja', caja.toString());
+  DB.set('prestamos', prestamos);
+  DB.set('pagos', pagos);
+  DB.set('movCaja', movimientosCaja);
+}
+
+// Arrancar
+initAuth();
+</script>
+</body>
+</html>
